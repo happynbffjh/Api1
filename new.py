@@ -1,6 +1,7 @@
 import requests
 import re
 import time
+import random
 
 def process_card_checkout(card_number, exp_month, exp_year, cvv):
     """Main function to process card checkout on epicalarc.com - returns raw response"""
@@ -14,7 +15,6 @@ def process_card_checkout(card_number, exp_month, exp_year, cvv):
         timeout = 30
         
         # Generate random email
-        import random
         email = f"user{random.randint(10000, 99999)}@gmail.com"
         
         # ========== STEP 1: ADD TO CART ==========
@@ -60,7 +60,6 @@ def process_card_checkout(card_number, exp_month, exp_year, cvv):
                 "email": email,
                 "raw_response": "Timeout: Add to cart failed",
                 "status": 408,
-                "gateway": "epicalarc.com",
                 "time_elapsed": round(time.time() - start_time, 2)
             }
 
@@ -90,7 +89,6 @@ def process_card_checkout(card_number, exp_month, exp_year, cvv):
                 "email": email,
                 "raw_response": "Timeout: Product page load failed",
                 "status": 408,
-                "gateway": "epicalarc.com",
                 "time_elapsed": round(time.time() - start_time, 2)
             }
 
@@ -103,7 +101,6 @@ def process_card_checkout(card_number, exp_month, exp_year, cvv):
                 "email": email,
                 "raw_response": "Could not find simulate cart nonce",
                 "status": 500,
-                "gateway": "epicalarc.com",
                 "time_elapsed": round(time.time() - start_time, 2)
             }
         
@@ -150,7 +147,6 @@ def process_card_checkout(card_number, exp_month, exp_year, cvv):
                 "email": email,
                 "raw_response": "Timeout: Simulate cart failed",
                 "status": 408,
-                "gateway": "epicalarc.com",
                 "time_elapsed": round(time.time() - start_time, 2)
             }
 
@@ -180,7 +176,6 @@ def process_card_checkout(card_number, exp_month, exp_year, cvv):
                 "email": email,
                 "raw_response": "Timeout: Checkout page load failed",
                 "status": 408,
-                "gateway": "epicalarc.com",
                 "time_elapsed": round(time.time() - start_time, 2)
             }
 
@@ -193,7 +188,6 @@ def process_card_checkout(card_number, exp_month, exp_year, cvv):
                 "email": email,
                 "raw_response": "Could not find checkout nonce",
                 "status": 500,
-                "gateway": "epicalarc.com",
                 "time_elapsed": round(time.time() - start_time, 2)
             }
         
@@ -210,7 +204,6 @@ def process_card_checkout(card_number, exp_month, exp_year, cvv):
                 "email": email,
                 "raw_response": "Could not find Stripe public key",
                 "status": 500,
-                "gateway": "epicalarc.com",
                 "time_elapsed": round(time.time() - start_time, 2)
             }
 
@@ -281,7 +274,6 @@ def process_card_checkout(card_number, exp_month, exp_year, cvv):
                 "email": email,
                 "raw_response": "Timeout: Stripe payment method creation failed",
                 "status": 408,
-                "gateway": "epicalarc.com",
                 "time_elapsed": round(time.time() - start_time, 2)
             }
 
@@ -294,7 +286,6 @@ def process_card_checkout(card_number, exp_month, exp_year, cvv):
                 "email": email,
                 "raw_response": f"Stripe payment method creation failed: {stripe_response.text[:500]}",
                 "status": stripe_response.status_code,
-                "gateway": "epicalarc.com",
                 "time_elapsed": round(time.time() - start_time, 2)
             }
         
@@ -390,21 +381,38 @@ def process_card_checkout(card_number, exp_month, exp_year, cvv):
                 "email": email,
                 "raw_response": "Timeout: Final checkout submission failed",
                 "status": 408,
-                "gateway": "epicalarc.com",
                 "time_elapsed": round(time.time() - start_time, 2)
             }
 
         # Calculate total time
         total_time = round(time.time() - start_time, 2)
         
-        # Return the raw response without any processing
+        # Clean up the raw response to remove HTML tags and extra spaces
+        raw_response = final_response.text
+        # Try to parse as JSON first
+        try:
+            response_json = final_response.json()
+            if isinstance(response_json, dict):
+                # Clean up messages if they exist
+                if "messages" in response_json and response_json["messages"]:
+                    # Remove HTML tags and extra whitespace
+                    messages = response_json["messages"]
+                    messages = re.sub(r'<[^>]+>', '', messages)  # Remove HTML tags
+                    messages = re.sub(r'\s+', ' ', messages)  # Replace multiple spaces with single space
+                    messages = messages.strip()
+                    response_json["messages"] = messages
+                raw_response = json.dumps(response_json)
+        except:
+            # If not JSON, just return as is
+            pass
+        
+        # Return the response WITHOUT gateway field
         return {
             "success": True if final_response.status_code == 200 else False,
             "card": f"{card_number[:6]}******{card_number[-4:]}",
             "email": email,
-            "raw_response": final_response.text,
+            "raw_response": raw_response,
             "status": final_response.status_code,
-            "gateway": "epicalarc.com",
             "time_elapsed": total_time
         }
 
@@ -415,7 +423,6 @@ def process_card_checkout(card_number, exp_month, exp_year, cvv):
             "email": "",
             "raw_response": f"Exception: {str(e)}",
             "status": 500,
-            "gateway": "epicalarc.com",
             "time_elapsed": round(time.time() - start_time, 2) if 'start_time' in locals() else 0
         }
 
@@ -424,4 +431,4 @@ def process_card_checkout(card_number, exp_month, exp_year, cvv):
 if __name__ == "__main__":
     # Test the function
     result = process_card_checkout("4111111111111111", "04", "2025", "123")
-    print("Test result:", result)
+    print("Test result:", json.dumps(result, indent=2))
