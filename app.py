@@ -1,20 +1,18 @@
-# app.py - Updated version
 from flask import Flask, request, jsonify
 from flask_cors import CORS
 from new import process_card_checkout
 import os
+import time
 
 app = Flask(__name__)
-CORS(app)  # Enable CORS
+CORS(app)
 
 def extract_card_details(card_string):
     """Extract card details from the format: 4112502772184364|09|29|416"""
     try:
-        # Split by pipe
         if '|' in card_string:
             parts = card_string.split('|')
         else:
-            # Try to parse without separators
             if len(card_string) >= 16:
                 card_number = card_string[:16]
                 remaining = card_string[16:]
@@ -44,7 +42,7 @@ def extract_card_details(card_string):
 @app.route('/')
 def home():
     return jsonify({
-        "message": "Legacy Games Card Checker API",
+        "message": "Epicalarc Card Checker API",
         "endpoints": {
             "check_card": "GET /<card_details>",
             "example": "https://surprising-willette-golmal-0ba321df.koyeb.app/4111111111111111|04|25|123",
@@ -52,7 +50,7 @@ def home():
             "status": "GET /status",
             "health": "GET /health"
         },
-        "gateway": "legacygames.com"
+        "gateway": "epicalarc.com"
     })
 
 @app.route('/<path:card_details>')
@@ -60,7 +58,6 @@ def process_card_route(card_details):
     """Process card with details from URL path"""
     print(f"Processing card: {card_details}")
     
-    # Extract card details from the URL
     card_info = extract_card_details(card_details)
     
     if not card_info:
@@ -72,7 +69,6 @@ def process_card_route(card_details):
             "received": card_details
         }), 400
     
-    # Process the card using the imported function
     try:
         print(f"Processing card: {card_info['card_number'][:6]}******{card_info['card_number'][-4:]}")
         
@@ -83,18 +79,7 @@ def process_card_route(card_details):
             cvv=card_info['cvv']
         )
         
-        # Format response
-        response_data = {
-            "success": result.get("success", False),
-            "message": result.get("message", "Unknown"),
-            "details": result.get("details", ""),
-            "card": result.get("card", f"{card_info['card_number'][:6]}******{card_info['card_number'][-4:]}"),
-            "email": result.get("email", ""),
-            "gateway": result.get("gateway", "legacygames.com"),
-            "response_code": result.get("response_code", 200)
-        }
-        
-        return jsonify(response_data), 200
+        return jsonify(result), 200
         
     except Exception as e:
         return jsonify({
@@ -102,7 +87,7 @@ def process_card_route(card_details):
             "message": f"Server error: {str(e)}",
             "card": f"{card_info['card_number'][:6]}******{card_info['card_number'][-4:]}",
             "email": "",
-            "gateway": "legacygames.com"
+            "gateway": "epicalarc.com"
         }), 500
 
 @app.route('/status')
@@ -110,13 +95,17 @@ def status():
     return jsonify({
         "success": True,
         "status": "online",
-        "gateway": "legacygames.com",
-        "timestamp": os.path.getmtime(__file__) if os.path.exists(__file__) else 0
+        "gateway": "epicalarc.com",
+        "timestamp": time.time()
     })
 
 @app.route('/health')
 def health():
     return jsonify({"status": "healthy"}), 200
+
+@app.route('/ping')
+def ping():
+    return jsonify({"message": "pong"}), 200
 
 # CORS headers
 @app.after_request
@@ -128,6 +117,5 @@ def after_request(response):
 
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 8080))
-    print(f"Starting Card Checker API on port {port}...")
-    print(f"Test URL: http://localhost:{port}/4111111111111111|04|25|123")
+    print(f"Starting Epicalarc Card Checker API on port {port}...")
     app.run(host='0.0.0.0', port=port, debug=False)
