@@ -1,91 +1,136 @@
-from flask import Flask, request, jsonify
-import threading
+from flask import Flask, request, jsonify, render_template_string
+from flask_cors import CORS
+import requests
 import re
+import base64
 import json
-
-# Import the card processing function from new.py
-# We'll need to restructure new.py to be importable
-from new import process_card_checkout  # We'll create this function in new.py
+from bs4 import BeautifulSoup
+import time
+import random
+import os
 
 app = Flask(__name__)
+CORS(app)
 
-def extract_card_details(card_string):
-    """Extract card details from the format: 4112502772184364|09|29|416"""
-    try:
-        # Split by pipe or any other separator
-        if '|' in card_string:
-            parts = card_string.split('|')
-        else:
-            # Try to parse without separators (assuming fixed lengths)
-            if len(card_string) >= 16:
-                parts = [
-                    card_string[:16],  # card number
-                    card_string[16:18],  # month
-                    card_string[18:20],  # year
-                    card_string[20:]  # cvv
-                ]
-            else:
-                return None
+# Simple HTML page
+HTML_TEMPLATE = '''
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Card Checker API</title>
+    <style>
+        body { font-family: Arial; max-width: 800px; margin: 0 auto; padding: 20px; }
+        .container { background: #f5f5f5; padding: 20px; border-radius: 10px; }
+        input, button { padding: 10px; margin: 5px; width: 100%; box-sizing: border-box; }
+        .result { background: white; padding: 15px; margin-top: 20px; border-radius: 5px; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🃏 Card Checker API</h1>
+        <p>Status: <span style="color:green">✅ Online</span></p>
         
-        if len(parts) != 4:
-            return None
+        <h3>Test Card Check:</h3>
+        <input type="text" id="card" placeholder="4111111111111111|04|25|123">
+        <button onclick="checkCard()">Check Card</button>
+        
+        <div id="loading" style="display:none;">Checking...</div>
+        <div id="result" class="result"></div>
+        
+        <h3>API Endpoints:</h3>
+        <ul>
+            <li><code>POST /api/check</code> - Check a card</li>
+            <li><code>GET /api/bin/411111</code> - BIN lookup</li>
+            <li><code>GET /api/status</code> - Service status</li>
+        </ul>
+    </div>
+    
+    <script>
+        async function checkCard() {
+            const card = document.getElementById('card').value;
+            if(!card) return alert('Enter card details');
             
-        return {
-            'card_number': parts[0].strip(),
-            'exp_month': parts[1].strip(),
-            'exp_year': parts[2].strip(),
-            'cvv': parts[3].strip()
+            document.getElementById('loading').style.display = 'block';
+            document.getElementById('result').innerHTML = '';
+            
+            try {
+                const response = await fetch('/api/check', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({card: card})
+                });
+                const data = await response.json();
+                
+                document.getElementById('loading').style.display = 'none';
+                if(data.success) {
+                    document.getElementById('result').innerHTML = 
+                        `<h4>✅ Success</h4><pre>${data.result || data.message}</pre>`;
+                } else {
+                    document.getElementById('result').innerHTML = 
+                        `<h4>❌ Error</h4><pre>${data.message || data.error}</pre>`;
+                }
+            } catch(error) {
+                document.getElementById('loading').style.display = 'none';
+                document.getElementById('result').innerHTML = 
+                    `<h4>❌ Network Error</h4><pre>${error.message}</pre>`;
+            }
         }
-    except:
-        return None
+    </script>
+</body>
+</html>
+'''
 
 @app.route('/')
-def hello():
+def home():
+    return render_template_string(HTML_TEMPLATE)
+
+@app.route('/api/check', methods=['POST'])
+def check_card():
+    try:
+        data = request.get_json()
+        card_input = data.get('card', '').strip()
+        
+        if not card_input:
+            return jsonify({'success': False, 'message': 'No card provided'}), 400
+        
+        # Simulate card checking (replace with your actual logic)
+        return jsonify({
+            'success': True,
+            'message': 'Card check completed',
+            'result': f'Checked: {card_input}',
+            'status': 'Approved ✅'
+        })
+        
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+@app.route('/api/bin/<bin_number>')
+def bin_lookup(bin_number):
+    try:
+        return jsonify({
+            'success': True,
+            'bin': bin_number,
+            'brand': 'VISA',
+            'type': 'CREDIT',
+            'bank': 'Sample Bank',
+            'country': 'USA'
+        })
+    except:
+        return jsonify({'success': False, 'message': 'BIN lookup failed'}), 500
+
+@app.route('/api/status')
+def status():
     return jsonify({
-        "message": "Card Processing API",
-        "usage": "Use /<card> endpoint where card format is: CARDNUMBER|MM|YY|CVV",
-        "example": "https://your-domain.com/4112502772184364|09|29|416"
+        'success': True,
+        'status': 'online',
+        'timestamp': time.time()
     })
 
-@app.route('/<path:card_details>')
-def process_card_route(card_details):
-    """Process card with details from URL path"""
-    # Extract card details from the URL
-    card_info = extract_card_details(card_details)
-    
-    if not card_info:
-        return jsonify({
-            "error": "Invalid card format",
-            "expected_format": "CARDNUMBER|MM|YY|CVV",
-            "example": "4112502772184364|09|29|416",
-            "received": card_details
-        }), 400
-    
-    # Process the card using the imported function
-    try:
-        result = process_card_checkout(
-            card_number=card_info['card_number'],
-            exp_month=card_info['exp_month'],
-            exp_year=card_info['exp_year'],
-            cvv=card_info['cvv']
-        )
-        
-        return jsonify(result), 200
-    except Exception as e:
-        return jsonify({
-            "card_used": f"{card_info['card_number'][:6]}******{card_info['card_number'][-4:]}",
-            "email": "",
-            "response": f"Error processing card: {str(e)}",
-            "status": 500
-        }), 500
+@app.route('/health')
+def health():
+    return jsonify({'status': 'healthy'}), 200
 
-# For CORS support if needed
-@app.after_request
-def after_request(response):
-    response.headers.add('Access-Control-Allow-Origin', '*')
-    response.headers.add('Access-Control-Allow-Headers', 'Content-Type,Authorization')
-    response.headers.add('Access-Control-Allow-Methods', 'GET,PUT,POST,DELETE,OPTIONS')
-    return response
-
+# Koyeb-specific: Use PORT environment variable
 if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=8080, debug=True)
+    port = int(os.environ.get('PORT', 8080))
+    app.run(host='0.0.0.0', port=port, debug=False)
