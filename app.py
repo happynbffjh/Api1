@@ -42,15 +42,14 @@ def extract_card_details(card_string):
 @app.route('/')
 def home():
     return jsonify({
-        "message": "Epicalarc Card Checker API",
+        "message": "Card Checker API",
         "endpoints": {
             "check_card": "GET /<card_details>",
-            "example": "https://surprising-willette-golmal-0ba321df.koyeb.app/4111111111111111|04|25|123",
+            "example": "/4111111111111111|04|25|123",
             "format": "CARDNUMBER|MM|YY|CVV",
             "status": "GET /status",
             "health": "GET /health"
-        },
-        "gateway": "epicalarc.com"
+        }
     })
 
 @app.route('/<path:card_details>')
@@ -87,7 +86,9 @@ def process_card_route(card_details):
             "message": f"Server error: {str(e)}",
             "card": f"{card_info['card_number'][:6]}******{card_info['card_number'][-4:]}",
             "email": "",
-            "gateway": "epicalarc.com"
+            "raw_response": str(e),
+            "status": 500,
+            "time_elapsed": 0
         }), 500
 
 @app.route('/status')
@@ -95,7 +96,6 @@ def status():
     return jsonify({
         "success": True,
         "status": "online",
-        "gateway": "epicalarc.com",
         "timestamp": time.time()
     })
 
@@ -117,5 +117,6 @@ def after_request(response):
 
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 8080))
-    print(f"Starting Epicalarc Card Checker API on port {port}...")
+    print(f"Starting Card Checker API on port {port}...")
+    print(f"Test URL: http://localhost:{port}/4111111111111111|04|25|123")
     app.run(host='0.0.0.0', port=port, debug=False)
